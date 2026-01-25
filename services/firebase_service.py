@@ -14,7 +14,8 @@ class FirebaseService:
     @staticmethod
     def get_user_ref(user_id: str):
         """Ottieni reference al nodo user"""
-        return db.reference(f'/users/{user_id}')
+        ref = db.reference(f'/users/{user_id}')
+        return ref
     
     @staticmethod
     def get_moods_ref(user_id: str):
@@ -40,6 +41,7 @@ class FirebaseService:
                 'theme': 'auto'
             }
         }
+        
         FirebaseService.get_user_ref(user_id).set(user_data)
         return user_data
     

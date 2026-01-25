@@ -28,6 +28,7 @@ async def register_user(user_data: UserRegister):
             display_name=user_data.name
         )
         
+        
         # Crea profilo nel database
         await firebase_service.create_user_profile(
             user_id=user_record.uid,
@@ -54,48 +55,6 @@ async def register_user(user_data: UserRegister):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Registration failed: {str(e)}"
-        )
-
-
-@router.post("/login", response_model=AuthResponse)
-async def login_user(credentials: UserLogin):
-    """
-    Login con email/password
-    
-    Nota: Firebase Admin SDK non supporta login diretto con password.
-    In produzione, il client dovrebbe usare Firebase Client SDK per login
-    e passare l'ID token al backend.
-    
-    Questo endpoint è un placeholder che verifica l'esistenza dell'utente
-    e genera un custom token.
-    """
-    try:
-        # Ottieni utente per email
-        user = firebase_auth.get_user_by_email(credentials.email)
-        
-        # In produzione, il client usa Firebase Client SDK per autenticarsi
-        # Qui generiamo un custom token per testing
-        custom_token = firebase_auth.create_custom_token(user.uid)
-        
-        # Ottieni profilo
-        profile = await firebase_service.get_user_profile(user.uid)
-        
-        return AuthResponse(
-            userId=user.uid,
-            token=custom_token.decode('utf-8') if isinstance(custom_token, bytes) else custom_token,
-            email=user.email,
-            name=profile.get('name') if profile else None
-        )
-    
-    except firebase_auth.UserNotFoundError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials"
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Login failed: {str(e)}"
         )
 
 

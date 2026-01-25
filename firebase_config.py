@@ -2,15 +2,23 @@ import firebase_admin
 from firebase_admin import credentials, db, auth
 import os
 
-# Inizializza Firebase Admin SDK
-cred = credentials.Certificate("mood-your-weather-firebase-adminsdk-fbsvc-da13f7ee3e.json")
 
-# URL del Realtime Database - modifica con il tuo project ID
-DATABASE_URL = os.getenv("FIREBASE_DATABASE_URL", "https://mood-your-weather-default-rtdb.firebaseio.com/")
 
-firebase_admin.initialize_app(cred, {
-    'databaseURL': DATABASE_URL
-})
+def initialize_firebase():
+    """Inizializza Firebase se non già fatto"""
+    if not firebase_admin._apps:
+        # Inizializza Firebase Admin SDK
+        cred = credentials.Certificate("mood-your-weather-firebase-adminsdk-fbsvc-da13f7ee3e.json")
+
+        firebase_admin.initialize_app(cred, {
+            'databaseURL': "https://mood-your-weather-default-rtdb.europe-west1.firebasedatabase.app/"
+        })
+        print("✅ Firebase initialized successfully")
+    else:
+        print("⚠️ Firebase already initialized")
+
+# Chiamalo all'avvio dell'app
+initialize_firebase()
 
 # Reference al database
 def get_db():
