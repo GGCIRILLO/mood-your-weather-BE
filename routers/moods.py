@@ -33,6 +33,7 @@ async def create_mood(
         )
     
     try:
+        print("mmod data:", mood_data)
         # Converti in dict per Firebase
         mood_dict = mood_data.model_dump()
         
@@ -97,13 +98,15 @@ async def get_moods(
         # Converti in MoodEntry objects
         mood_entries = [MoodEntry(**mood) for mood in moods_data]
         
-        return MoodList(
+        
+        res =  MoodList(
             items=mood_entries,
             total=total,
             limit=limit,
             offset=offset,
             hasMore=(offset + limit) < total
         )
+        return res
     
     except Exception as e:
         raise HTTPException(

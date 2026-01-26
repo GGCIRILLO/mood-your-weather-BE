@@ -75,26 +75,34 @@ class MoodCreate(BaseModel):
     """Creazione nuovo mood entry"""
     userId: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)
-    emojis: List[MoodEmoji] = Field(..., min_length=1, max_length=5)
+    emojis: List[str] = Field(..., min_length=1, max_length=5)
     intensity: int = Field(..., ge=0, le=100, description="Intensità mood 0-100")
     note: Optional[str] = Field(None, max_length=500)
     location: Optional[Location] = None
     
     @validator('emojis')
     def validate_emojis(cls, v):
-        """Rimuovi duplicati negli emojis"""
+        """Rimuovi duplicati e valida che siano emoji valide"""
+        valid_emojis = [e.value for e in MoodEmoji]
+        for emoji in v:
+            if emoji not in valid_emojis:
+                raise ValueError(f"Invalid emoji: {emoji}. Must be one of {valid_emojis}")
         return list(dict.fromkeys(v))  # Mantiene ordine, rimuove duplicati
 
 
 class MoodUpdate(BaseModel):
     """Aggiornamento mood entry esistente"""
-    emojis: Optional[List[MoodEmoji]] = Field(None, min_length=1, max_length=5)
+    emojis: Optional[List[str]] = Field(None, min_length=1, max_length=5)
     intensity: Optional[int] = Field(None, ge=0, le=100)
     note: Optional[str] = Field(None, max_length=500)
     
     @validator('emojis')
     def validate_emojis(cls, v):
         if v is not None:
+            valid_emojis = [e.value for e in MoodEmoji]
+            for emoji in v:
+                if emoji not in valid_emojis:
+                    raise ValueError(f"Invalid emoji: {emoji}. Must be one of {valid_emojis}")
             return list(dict.fromkeys(v))
         return v
 
@@ -104,7 +112,7 @@ class MoodEntry(BaseModel):
     entryId: str
     userId: str
     timestamp: datetime
-    emojis: List[MoodEmoji]
+    emojis: List[str]
     intensity: int
     note: Optional[str] = None
     location: Optional[Location] = None
@@ -153,7 +161,7 @@ class UserStats(BaseModel):
     totalEntries: int
     currentStreak: int
     longestStreak: int
-    dominantMood: Optional[MoodEmoji] = None
+    dominantMood: Optional[str] = None
     averageIntensity: float
     weeklyRhythm: Optional[WeeklyRhythm] = None
     patterns: List[MoodPattern] = []
@@ -162,7 +170,7 @@ class UserStats(BaseModel):
 
 class CalendarDay(BaseModel):
     """Dati mood per un giorno nel calendario"""
-    emojis: List[MoodEmoji]
+    emojis: List[str]
     intensity: int
     hasNote: bool = False
 
@@ -208,7 +216,7 @@ class NLPAnalyzeResponse(BaseModel):
     sentiment: str  # "positive", "negative", "neutral"
     score: float = Field(..., ge=-1, le=1)
     magnitude: float
-    emojis_suggested: List[MoodEmoji] = []
+    emojis_suggested: List[str] = []
 
 
 # ==================== Export Models (Skeleton) ====================
@@ -235,7 +243,7 @@ class SyncMoodEntry(BaseModel):
     localId: str  # ID temporaneo generato dal client
     userId: str
     timestamp: datetime
-    emojis: List[MoodEmoji]
+    emojis: List[str]
     intensity: int
     note: Optional[str] = None
     location: Optional[Location] = None
@@ -269,7 +277,7 @@ class SyncResponse(BaseModel):
 class MoodForecast(BaseModel):
     """Previsione mood futuri (skeleton)"""
     date: datetime
-    predicted_mood: MoodEmoji
+    predicted_mood: str
     confidence: float = Field(..., ge=0, le=1)
     factors: List[str] = []  # ["weather_pattern", "time_of_week", "historical_trend"]
 
