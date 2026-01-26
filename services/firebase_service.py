@@ -3,7 +3,7 @@ Servizi per interazione con Firebase Realtime Database
 """
 from firebase_admin import db, auth as firebase_auth
 from typing import Optional, List, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from models import MoodEntry, MoodEmoji, Location, ExternalWeather
 import uuid
 
@@ -35,7 +35,7 @@ class FirebaseService:
         user_data = {
             'email': email,
             'name': name or email.split('@')[0],
-            'createdAt': datetime.utcnow().isoformat(),
+            'createdAt': datetime.now(timezone.utc).isoformat(),
             'settings': {
                 'notifications': True,
                 'theme': 'auto'
@@ -73,8 +73,8 @@ class FirebaseService:
         
         # Aggiungi metadata
         mood_data['entryId'] = entry_id
-        mood_data['createdAt'] = datetime.utcnow().isoformat()
-        mood_data['timestamp'] = mood_data.get('timestamp', datetime.utcnow()).isoformat()
+        mood_data['createdAt'] = datetime.now(timezone.utc).isoformat()
+        mood_data['timestamp'] = mood_data.get('timestamp', datetime.now(timezone.utc)).isoformat()
         
         # Serializza emojis e location
         if 'emojis' in mood_data and isinstance(mood_data['emojis'], list):
@@ -155,7 +155,7 @@ class FirebaseService:
             return False
         
         # Aggiungi timestamp aggiornamento
-        update_data['updatedAt'] = datetime.utcnow().isoformat()
+        update_data['updatedAt'] = datetime.now(timezone.utc).isoformat()
         
         # Serializza emojis se presenti
         if 'emojis' in update_data and update_data['emojis']:

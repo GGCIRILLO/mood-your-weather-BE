@@ -3,7 +3,7 @@ Router per CRUD mood entries
 """
 from fastapi import APIRouter, HTTPException, status, Depends, Query
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from models import MoodCreate, MoodUpdate, MoodEntry, MoodList
 from services.firebase_service import firebase_service
 from middleware.auth import get_current_user_id, check_rate_limit
@@ -19,8 +19,10 @@ async def create_mood(
     _: None = Depends(check_rate_limit)
 ):
     """
-    Crea nuovo mood entry
+    Crea o aggiorna mood entry per la giornata corrente
     
+    - Se esiste già un mood per la giornata, lo aggiorna
+    - Altrimenti crea un nuovo mood entry
     - Salva nel Firebase Realtime Database
     - Trigger aggiornamento statistiche in background
     - Supporta location opzionale per correlazione meteo
@@ -33,28 +35,66 @@ async def create_mood(
         )
     
     try:
-        print("mmod data:", mood_data)
-        # Converti in dict per Firebase
+        # Ottieni la data del mood (timestamp è ora sempre timezone-aware in UTC)
+        mood_date = mood_data.timestamp.date()
+        
+        # Cerca mood esistente per la stessa giornata (crea datetime UTC-aware)
+        start_of_day = datetime.combine(mood_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+        end_of_day = datetime.combine(mood_date, datetime.max.time()).replace(tzinfo=timezone.utc)
+        
+        existing_moods, total = await firebase_service.get_mood_entries(
+            user_id=current_user_id,
+            start_date=start_of_day,
+            end_date=end_of_day,
+            limit=1,
+            offset=0
+        )
+        
         mood_dict = mood_data.model_dump()
         
-        # Crea entry
-        entry_id = await firebase_service.create_mood_entry(mood_dict)
+        if existing_moods:
+            # Aggiorna il mood esistente
+            existing_entry = existing_moods[0]
+            entry_id = existing_entry['entryId']
+            
+            # Prepara dati per update (escludi userId e timestamp)
+            update_dict = {
+                'emojis': mood_dict['emojis'],
+                'intensity': mood_dict['intensity'],
+                'note': mood_dict.get('note'),
+                'location': mood_dict.get('location')
+            }
+            
+            success = await firebase_service.update_mood_entry(
+                current_user_id,
+                entry_id,
+                update_dict
+            )
+            
+            if not success:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to update existing mood"
+                )
+        else:
+            # Crea nuovo entry
+            entry_id = await firebase_service.create_mood_entry(mood_dict)
         
         # Recupera entry completo
-        created_mood = await firebase_service.get_mood_entry(current_user_id, entry_id)
+        final_mood = await firebase_service.get_mood_entry(current_user_id, entry_id)
         
-        if not created_mood:
+        if not final_mood:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to retrieve created mood"
+                detail="Failed to retrieve mood entry"
             )
         
-        return MoodEntry(**created_mood)
+        return MoodEntry(**final_mood)
     
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create mood: {str(e)}"
+            detail=f"Failed to create/update mood: {str(e)}"
         )
 
 

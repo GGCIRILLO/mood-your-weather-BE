@@ -1,9 +1,9 @@
 """
 Modelli Pydantic per validazione e serializzazione dati
 """
-from pydantic import BaseModel, EmailStr, Field, validator
+from pydantic import BaseModel, EmailStr, Field, validator, field_validator
 from typing import Optional, List, Dict
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 
@@ -79,6 +79,14 @@ class MoodCreate(BaseModel):
     intensity: int = Field(..., ge=0, le=100, description="Intensità mood 0-100")
     note: Optional[str] = Field(None, max_length=500)
     location: Optional[Location] = None
+    
+    @field_validator('timestamp')
+    @classmethod
+    def make_aware(cls, v):
+        """Forza timestamp a essere timezone-aware in UTC"""
+        if v.tzinfo is None:
+            return v.replace(tzinfo=timezone.utc)
+        return v
     
     @validator('emojis')
     def validate_emojis(cls, v):
