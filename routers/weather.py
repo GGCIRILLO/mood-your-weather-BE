@@ -5,9 +5,13 @@ from fastapi import APIRouter, HTTPException, status, Query, Depends
 from typing import Optional
 import httpx
 import os
+import logging
 from datetime import datetime, timedelta
-from models import WeatherCurrent, Location
+from models import WeatherCurrent, Location, ExternalWeather
 from middleware.auth import optional_auth
+
+# Setup logger
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/weather", tags=["Weather"])
@@ -71,11 +75,65 @@ async def fetch_openweather_data(lat: float, lon: float) -> dict:
             detail="Weather API request timeout"
         )
     
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Failed to fetch weather data: {str(e)}"
         )
+
+
+async def fetch_and_parse_weather(lat: float, lon: float) -> Optional[ExternalWeather]:
+    """
+    Fetch weather data and parse into ExternalWeather model.
+    Returns None on error to avoid blocking mood creation.
+    """
+    try:
+        # Check cache (reuse existing cache logic if possible, or simplified for this use case)
+        cache_key = get_cache_key(lat, lon)
+        now = datetime.utcnow()
+        
+        if cache_key in weather_cache:
+            cached_data, cached_time = weather_cache[cache_key]
+            # Cached data is the raw dict from WeatherCurrent.model_dump()
+            # We need to extract fields for ExternalWeather
+            if now - cached_time < CACHE_DURATION:
+                # We have a full WeatherCurrent dict, map it to ExternalWeather
+                return ExternalWeather(
+                    temp=cached_data['temp'],
+                    feels_like=cached_data['feels_like'],
+                    humidity=cached_data['humidity'],
+                    weather_main=cached_data['weather_main'],
+                    weather_description=cached_data['weather_description'],
+                    icon=cached_data['icon']
+                )
+
+        # Fetch fresh data
+        weather_data = await fetch_openweather_data(lat, lon)
+        
+        # Parse relevant fields
+        external_weather = ExternalWeather(
+            temp=weather_data['main']['temp'],
+            feels_like=weather_data['main']['feels_like'],
+            humidity=weather_data['main']['humidity'],
+            weather_main=weather_data['weather'][0]['main'],
+            weather_description=weather_data['weather'][0]['description'],
+            icon=weather_data['weather'][0]['icon']
+        )
+        
+        # We assume the main get_current_weather endpoint will handle its own caching 
+        # when called directly. Since we are reusing fetch_openweather_data which returns raw JSON,
+        # we can optionally update cache here too if we want full consistency, 
+        # but technically we only need the ExternalWeather subset here.
+        # For simplicity and to avoid side effects on the main cache structure (which stores WeatherCurrent),
+        # we won't write to the global cache here unless we reconstruct the full object, 
+        # which requires more parsing.
+        
+        return external_weather
+
+    except Exception as e:
+        logger.error(f"Error fetching weather for mood: {str(e)}")
+        return None
 
 
 @router.get("/current", response_model=WeatherCurrent)
