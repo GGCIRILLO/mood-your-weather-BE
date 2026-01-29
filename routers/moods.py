@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from models import MoodCreate, MoodUpdate, MoodEntry, MoodList
 from services.firebase_service import firebase_service
 from middleware.auth import get_current_user_id, check_rate_limit
+from routers.weather import fetch_and_parse_weather
 
 
 router = APIRouter(prefix="/moods", tags=["Moods"])
@@ -50,7 +51,18 @@ async def create_mood(
             offset=0
         )
         
+        
         mood_dict = mood_data.model_dump()
+        
+        # 3. Fetch external weather if location is provided
+        if mood_data.location:
+             external_weather = await fetch_and_parse_weather(
+                 mood_data.location.lat, 
+                 mood_data.location.lon
+             )
+             if external_weather:
+                 mood_dict['externalWeather'] = external_weather.model_dump()
+        
         
         if existing_moods:
             # Aggiorna il mood esistente
@@ -64,6 +76,9 @@ async def create_mood(
                 'note': mood_dict.get('note'),
                 'location': mood_dict.get('location')
             }
+            
+            if 'externalWeather' in mood_dict:
+                update_dict['externalWeather'] = mood_dict['externalWeather']
             
             success = await firebase_service.update_mood_entry(
                 current_user_id,

@@ -82,10 +82,16 @@ class FirebaseService:
             mood_data['emojis'] = [str(e) for e in mood_data['emojis']]
         
         if 'location' in mood_data and mood_data['location']:
-            mood_data['location'] = {
-                'lat': mood_data['location'].lat,
-                'lon': mood_data['location'].lon
-            }
+            loc = mood_data['location']
+            # Handle both object (Pydantic) and dict access
+            lat = getattr(loc, 'lat', loc.get('lat') if isinstance(loc, dict) else None)
+            lon = getattr(loc, 'lon', loc.get('lon') if isinstance(loc, dict) else None)
+            
+            if lat is not None and lon is not None:
+                mood_data['location'] = {
+                    'lat': lat,
+                    'lon': lon
+                }
         
         # Salva nel database
         FirebaseService.get_moods_ref(user_id).child(entry_id).set(mood_data)
