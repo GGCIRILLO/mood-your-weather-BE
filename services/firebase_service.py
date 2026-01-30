@@ -69,7 +69,6 @@ class FirebaseService:
         user_id = mood_data['userId']
         entry_id = str(uuid.uuid4())
         
-        print("mood data in service:", mood_data)
         
         # Aggiungi metadata
         mood_data['entryId'] = entry_id
@@ -78,7 +77,6 @@ class FirebaseService:
         
         # Serializza emojis e location
         if 'emojis' in mood_data and isinstance(mood_data['emojis'], list):
-            print("Serializing emojis:", mood_data['emojis'])
             mood_data['emojis'] = [str(e) for e in mood_data['emojis']]
         
         if 'location' in mood_data and mood_data['location']:
