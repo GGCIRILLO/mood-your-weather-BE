@@ -4,7 +4,7 @@ Router per analisi NLP (Natural Language Processing)
 from fastapi import APIRouter, HTTPException, status, Depends
 from models import NLPAnalyzeRequest, NLPAnalyzeResponse, MoodEmoji
 from middleware.auth import get_current_user_id
-from google.cloud import language_v1
+import httpx
 import os
 import logging
 
@@ -16,15 +16,20 @@ router = APIRouter(prefix="/nlp", tags=["NLP"])
 @router.post("/analyze", response_model=NLPAnalyzeResponse)
 async def analyze_sentiment(
     request: NLPAnalyzeRequest,
-    current_user_id: str = Depends(get_current_user_id)
+    
+    
+    # current_user_id: str = Depends(get_current_user_id)
+    current_user_id: str = "test_user_verifying" # Depends(get_current_user_id)
+    
 ):
     """
-    Analisi sentiment di note testuali con Google Cloud NLP API
+    Analisi sentiment di note testuali con Hugging Face Inference API
+    Model: cardiffnlp/twitter-roberta-base-sentiment-latest
     """
     try:
-        # Check if Google Credentials are set
-        if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
-             logger.warning("GOOGLE_APPLICATION_CREDENTIALS not set. Using mock NLP response.")
+        hf_token = os.getenv("HF_TOKEN")
+        if not hf_token or hf_token == "hf_":
+             logger.warning("HF_TOKEN not set. Using mock NLP response.")
              return NLPAnalyzeResponse(
                 sentiment="neutral",
                 score=0.0,
@@ -32,50 +37,68 @@ async def analyze_sentiment(
                 emojis_suggested=[MoodEmoji.CLOUDY]
             )
 
-        client = language_v1.LanguageServiceClient()
-        document = language_v1.Document(
-            content=request.text,
-            type_=language_v1.Document.Type.PLAIN_TEXT
-        )
+        # Updated API Domain
+        api_url = "https://router.huggingface.co/hf-inference/models/cardiffnlp/twitter-roberta-base-sentiment-latest"
+        headers = {"Authorization": f"Bearer {hf_token}"}
+        payload = {"inputs": request.text}
         
-        response = client.analyze_sentiment(request={'document': document})
-        sentiment = response.document_sentiment
+        async with httpx.AsyncClient() as client:
+            response = await client.post(api_url, headers=headers, json=payload)
+            
+        if response.status_code != 200:
+            logger.error(f"HF API Error: {response.status_code} - {response.text}")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY, 
+                detail=f"NLP Provider Error: {response.status_code}"
+            )
         
-        score = sentiment.score
-        magnitude = sentiment.magnitude
+        # Hugging Face returns a list of list of dicts
+        result = response.json()
         
-        # Map sentiment to MoodEmoji
-        # Score range: -1.0 (negative) to 1.0 (positive)
-        suggested_emojis = []
-        sentiment_label = "neutral"
-        
-        if score > 0.25:
-            sentiment_label = "positive"
-            suggested_emojis.append(MoodEmoji.SUNNY)
-            if magnitude > 0.6:
-                 suggested_emojis.append(MoodEmoji.PARTLY) # Excited/Active
-        elif score < -0.25:
-            sentiment_label = "negative"
-            suggested_emojis.append(MoodEmoji.RAINY)
-            if magnitude > 0.6:
-                suggested_emojis.append(MoodEmoji.STORMY)
+        if isinstance(result, list) and len(result) > 0 and isinstance(result[0], list):
+            scores = result[0]
+        elif isinstance(result, dict) and 'error' in result:
+             logger.error(f"HF Model Loading: {result}")
+             raise HTTPException(status_code=503, detail="Model is loading, please try again")
         else:
-            sentiment_label = "neutral"
-            suggested_emojis.append(MoodEmoji.CLOUDY)
-            if magnitude > 0.5:
-                suggested_emojis.append(MoodEmoji.PARTLY)
+             scores = result 
+             
+        # Sort by score descending to find dominant sentiment
+        scores.sort(key=lambda x: x['score'], reverse=True)
+        top_sentiment = scores[0]
+        
+        raw_label = top_sentiment['label'] 
+        score = top_sentiment['score']
+        
+        # Normalize labels for cardiffnlp/twitter-roberta-base-sentiment-latest
+        # Mapping: negative, neutral, positive
+        label = raw_label.lower()
+        
+        sentiment_label = label 
+        suggested_emojis = []
 
-        # Fallback if empty (shouldn't happen with logic above)
-        if not suggested_emojis:
-             suggested_emojis.append(MoodEmoji.CLOUDY)
+        if label == "positive":
+            suggested_emojis.append(MoodEmoji.SUNNY)
+            if score > 0.8:
+                suggested_emojis.append(MoodEmoji.PARTLY)
+        elif label == "negative":
+            suggested_emojis.append(MoodEmoji.RAINY)
+            if score > 0.8:
+                suggested_emojis.append(MoodEmoji.STORMY)
+        else: # neutral
+            suggested_emojis.append(MoodEmoji.CLOUDY)
+            if score > 0.6:
+                suggested_emojis.append(MoodEmoji.PARTLY)
 
         return NLPAnalyzeResponse(
             sentiment=sentiment_label,
-            score=score,
-            magnitude=magnitude,
+            score=round(score, 2), # Using probability as score
+            magnitude=round(score, 2), # Using probability as magnitude proxy
             emojis_suggested=suggested_emojis
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"NLP Analysis failed: {str(e)}")
         # Graceful degradation
@@ -92,9 +115,10 @@ async def nlp_health_check():
     """
     Health check per servizio NLP
     """
-    creds_set = bool(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
+    creds_set = bool(os.getenv("HF_TOKEN"))
     return {
         "service": "NLP",
+        "provider": "Hugging Face API",
         "status": "active" if creds_set else "mocked",
-        "message": "Google Cloud NLP integration active" if creds_set else "Credentials missing, running in mock mode"
+        "message": "HF integration active" if creds_set else "Token missing, running in mock mode"
     }

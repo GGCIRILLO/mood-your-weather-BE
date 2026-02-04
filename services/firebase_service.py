@@ -344,5 +344,40 @@ class FirebaseService:
         return calendar_data
 
 
+
+    # ==================== Notification Operations ====================
+    
+    @staticmethod
+    async def save_fcm_token(user_id: str, token: str):
+        """Salva token FCM per utente"""
+        FirebaseService.get_user_ref(user_id).child('fcmToken').set(token)
+    
+    @staticmethod
+    async def get_fcm_token(user_id: str) -> Optional[str]:
+        """Ottieni token FCM utente"""
+        token = FirebaseService.get_user_ref(user_id).child('fcmToken').get()
+        return token if isinstance(token, str) else None
+
+    @staticmethod
+    async def send_push_notification(token: str, title: str, body: str, data: Optional[Dict] = None) -> bool:
+        """Invia notifica push via FCM"""
+        from firebase_admin import messaging
+        
+        try:
+            message = messaging.Message(
+                notification=messaging.Notification(
+                    title=title,
+                    body=body
+                ),
+                data=data,
+                token=token,
+            )
+            response = messaging.send(message)
+            print("Successfully sent message:", response)
+            return True
+        except Exception as e:
+            print("Error sending message:", e)
+            return False
+
 # Istanza singleton
 firebase_service = FirebaseService()
