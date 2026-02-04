@@ -92,6 +92,9 @@ class FirebaseService:
                     'lat': lat,
                     'lon': lon
                 }
+            else:
+                # Ensure we don't persist unexpected or non-serializable location shapes
+                mood_data['location'] = None
         
         # Salva nel database
         FirebaseService.get_moods_ref(user_id).child(entry_id).set(mood_data)

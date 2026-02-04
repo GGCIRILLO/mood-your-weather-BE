@@ -74,7 +74,7 @@ async def analyze_sentiment(
         # Mapping: negative, neutral, positive
         label = raw_label.lower()
         
-        sentiment_label = label 
+
         suggested_emojis = []
 
         if label == "positive":
@@ -91,7 +91,7 @@ async def analyze_sentiment(
                 suggested_emojis.append(MoodEmoji.PARTLY)
 
         return NLPAnalyzeResponse(
-            sentiment=sentiment_label,
+            sentiment=label,
             score=round(score, 2), # Using probability as score
             magnitude=round(score, 2), # Using probability as magnitude proxy
             emojis_suggested=suggested_emojis
@@ -101,12 +101,9 @@ async def analyze_sentiment(
         raise
     except Exception as e:
         logger.error(f"NLP Analysis failed: {str(e)}")
-        # Graceful degradation
-        return NLPAnalyzeResponse(
-            sentiment="error",
-            score=0.0,
-            magnitude=0.0,
-            emojis_suggested=[MoodEmoji.CLOUDY] # Default fallback
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"NLP Analysis failed: {str(e)}"
         )
 
 
