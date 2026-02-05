@@ -77,21 +77,81 @@ async def test_notification(
 async def send_daily_reminders(
     # In production, secure this with an Admin Key check or similar
     # admin_key: str = Depends(verify_admin_key)
+    target_user_id: Optional[str] = None
 ):
     """
-    Trigger invio promemoria giornalieri (Skeleton)
+    Trigger invio promemoria giornalieri
     
-    Questo endpoint dovrebbe essere chiamato da un job schedulato (es. CRON).
-    Per ora, simula l'invio inviando una notifica generica agli utenti che hanno un token.
+    Se target_user_id è specificato, invia solo a quell'utente (utile per test/cron specifici).
+    Altrimenti, questo endpoint dovrebbe iterare su tutti gli utenti (logica complessa su Firebase Realtime DB).
     
-    NOTA: In un'app reale, itereremmo su tutti gli utenti e controlleremmo se hanno loggato oggi.
-    Per semplicità, questo è uno stub che dimostra il concetto.
+    Logica:
+    - Se l'utente non ha loggato oggi:
+        - Se ha uno streak attivo (>0): "🔥 Keep your 7-day streak alive!"
+        - Altrimenti: "⏰ Time to track your mood!"
     """
-    # TODO: Fetch all users with tokens > Check mood today > Send
-    # Since we don't have a "get all users" efficient query easily without scanning firebase,
-    # we will just return a message saying this requires external scheduler logic.
-    
-    return {
-        "message": "Daily reminder trigger endpoint ready. Logic to iterate users pending implementation.",
-        "note": "Call POST /notifications/test to verify connectivity first."
-    }
+    if not target_user_id:
+        return {
+             "message": "Please provide target_user_id for now. Batch iteration requires dedicated worker.",
+             "status": "skipped"
+        }
+
+    try:
+        # 1. Get Token
+        token = await firebase_service.get_fcm_token(target_user_id)
+        if not token:
+             return {"message": f"No token for user {target_user_id}", "status": "skipped"}
+
+        # 2. Get Stats to check last activity
+        stats = await firebase_service.get_user_stats(target_user_id)
+        if not stats:
+             # No stats implies no activity ever, send welcome/daily?
+             await firebase_service.send_push_notification(
+                token=token,
+                title="Mood Tracker",
+                body="⏰ Time to track your first mood!"
+            )
+             return {"message": "Sent first reminder", "status": "sent"}
+
+        # 3. Check if logged today
+        last_updated_str = stats.get('lastUpdated')
+        if not last_updated_str:
+             # Should not happen if stats exist
+             return {"message": "Invalid stats", "status": "error"}
+             
+        from datetime import datetime, timezone
+        last_updated = datetime.fromisoformat(last_updated_str.replace('Z', '+00:00'))
+        today = datetime.now(timezone.utc).date()
+        
+        if last_updated.date() < today:
+            # Not logged today
+            current_streak = stats.get('currentStreak', 0)
+            
+            if current_streak > 0:
+                 # Streak Saver
+                 await firebase_service.send_push_notification(
+                    token=token,
+                    title="Streak Alert! 🔥",
+                    body=f"Keep your {current_streak}-day streak alive!"
+                )
+                 msg = "Sent streak reminder"
+            else:
+                 # Standard Reminder
+                 await firebase_service.send_push_notification(
+                    token=token,
+                    title="Mood Reminder ⏰",
+                    body="Time to track your mood!"
+                )
+                 msg = "Sent daily reminder"
+            
+            return {"message": msg, "user_id": target_user_id, "status": "sent"}
+            
+        else:
+            return {"message": "User already logged today", "user_id": target_user_id, "status": "skipped"}
+
+    except Exception as e:
+        logger.error(f"Reminder trigger failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Reminder failed: {str(e)}"
+        )
