@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 import firebase_config  # Inizializza Firebase
 
 # Import routers
-from routers import auth, moods, stats, weather, sync, nlp, export
+from routers import auth, moods, stats, weather, sync, nlp, export, challenges
 
 
 # ==================== Lifespan Events ====================
@@ -68,6 +68,7 @@ app.include_router(weather.router)
 app.include_router(sync.router)
 app.include_router(nlp.router)
 app.include_router(export.router)
+app.include_router(challenges.router)
 
 
 # ==================== Root Endpoints ====================
@@ -87,7 +88,8 @@ async def root():
             "weather": "/weather",
             "sync": "/sync",
             "nlp": "/nlp (skeleton)",
-            "export": "/export (skeleton)"
+            "export": "/export (skeleton)",
+            "challenges": "/challenges"
         }
     }
 

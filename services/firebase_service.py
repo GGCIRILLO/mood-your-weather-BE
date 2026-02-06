@@ -190,6 +190,26 @@ class FirebaseService:
         moods_data: Dict = moods_data_raw if isinstance(moods_data_raw, dict) else {}
         
         if not moods_data:
+            # Anche se non ci sono mood, potremmo avere altre statistiche da preservare
+            existing_stats = await FirebaseService.get_user_stats(user_id) or {}
+            unlocked_badges = existing_stats.get('unlockedBadges', [])
+            
+            # Check mindful_moment badge even if no moods
+            if existing_stats.get('mindfulMomentsCount', 0) >= 1 and "mindful_moment" not in unlocked_badges:
+                unlocked_badges.append("mindful_moment")
+
+            stats = {
+                'totalEntries': 0,
+                'currentStreak': 0,
+                'longestStreak': 0,
+                'dominantMood': None,
+                'averageIntensity': 0,
+                'weeklyRhythm': {d: 0 for d in ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']},
+                'mindfulMomentsCount': existing_stats.get('mindfulMomentsCount', 0),
+                'unlockedBadges': unlocked_badges,
+                'lastUpdated': datetime.utcnow().isoformat()
+            }
+            FirebaseService.get_stats_ref(user_id).set(stats)
             return
         
         moods_list = list(moods_data.values())
@@ -213,6 +233,27 @@ class FirebaseService:
         # Calcola ritmo settimanale
         weekly_rhythm = FirebaseService._calculate_weekly_rhythm(moods_list)
         
+        # Recupera statistiche esistenti per preservare campi non calcolati qui
+        stats_ref = FirebaseService.get_stats_ref(user_id)
+        existing_stats_raw = stats_ref.get()
+        existing_stats = existing_stats_raw if isinstance(existing_stats_raw, dict) else {}
+        unlocked_badges = existing_stats.get('unlockedBadges', [])
+        
+        # Verifica sblocco badge basato sui mood correnti
+        if current_streak >= 7 and "7_day_streak" not in unlocked_badges:
+            unlocked_badges.append("7_day_streak")
+            
+        has_note = any(mood.get('note') and str(mood.get('note')).strip() for mood in moods_list)
+        if has_note and "storyteller" not in unlocked_badges:
+            unlocked_badges.append("storyteller")
+            
+        has_mixed_weather = any(len(mood.get('emojis', [])) >= 2 for mood in moods_list)
+        if has_mixed_weather and "weather_mixologist" not in unlocked_badges:
+            unlocked_badges.append("weather_mixologist")
+            
+        if existing_stats.get('mindfulMomentsCount', 0) >= 1 and "mindful_moment" not in unlocked_badges:
+            unlocked_badges.append("mindful_moment")
+
         stats = {
             'totalEntries': total_entries,
             'currentStreak': current_streak,
@@ -220,54 +261,66 @@ class FirebaseService:
             'dominantMood': dominant_mood,
             'averageIntensity': round(average_intensity, 2),
             'weeklyRhythm': weekly_rhythm,
+            'mindfulMomentsCount': existing_stats.get('mindfulMomentsCount', 0),
+            'unlockedBadges': unlocked_badges,
             'lastUpdated': datetime.utcnow().isoformat()
         }
-        
-        FirebaseService.get_stats_ref(user_id).set(stats)
+        stats_ref.set(stats)
     
     @staticmethod
     def _calculate_streaks(moods_list: List[Dict]) -> tuple[int, int]:
-        """Calcola current e longest streak"""
+        """
+        Calcola current e longest streak.
+        Uno streak è 'corrente' se l'ultimo log è oggi o ieri.
+        """
         if not moods_list:
             return 0, 0
         
-        # Ordina per timestamp
-        sorted_moods = sorted(moods_list, key=lambda x: x['timestamp'])
-        
-        # Estrai date uniche
+        # Estrai date uniche (timezone aware)
         dates = set()
-        for mood in sorted_moods:
-            timestamp = datetime.fromisoformat(mood['timestamp'].replace('Z', '+00:00'))
-            dates.add(timestamp.date())
+        for mood in moods_list:
+            ts_str = mood.get('timestamp')
+            if not ts_str:
+                continue
+            if 'Z' in ts_str:
+                ts_str = ts_str.replace('Z', '+00:00')
+            try:
+                timestamp = datetime.fromisoformat(ts_str)
+                dates.add(timestamp.date())
+            except ValueError:
+                continue
         
-        dates = sorted(dates, reverse=True)
+        sorted_dates = sorted(list(dates), reverse=True)
         
-        if not dates:
+        if not sorted_dates:
             return 0, 0
-        
-        # Calcola current streak
-        current_streak = 0
+            
         today = datetime.utcnow().date()
+        yesterday = today - timedelta(days=1)
         
-        for i, date in enumerate(dates):
-            expected_date = today - timedelta(days=i)
-            if date == expected_date:
-                current_streak += 1
-            else:
-                break
-        
-        # Calcola longest streak
+        # Current streak logic: must have logged today or yesterday
+        current_streak = 0
+        if sorted_dates[0] >= yesterday:
+            anchor_date = sorted_dates[0]
+            for i, date in enumerate(sorted_dates):
+                if date == anchor_date - timedelta(days=i):
+                    current_streak += 1
+                else:
+                    break
+        else:
+            # Last log was before yesterday, streak is broken
+            current_streak = 0
+            
+        # Longest streak logic
         longest_streak = 1
         temp_streak = 1
-        
-        for i in range(len(dates) - 1):
-            diff = (dates[i] - dates[i + 1]).days
-            if diff == 1:
+        for i in range(len(sorted_dates) - 1):
+            if (sorted_dates[i] - sorted_dates[i + 1]).days == 1:
                 temp_streak += 1
                 longest_streak = max(longest_streak, temp_streak)
             else:
                 temp_streak = 1
-        
+                
         return current_streak, longest_streak
     
     @staticmethod
@@ -292,16 +345,25 @@ class FirebaseService:
     @staticmethod
     async def get_user_stats(user_id: str) -> Optional[Dict]:
         """Ottieni statistiche utente"""
-        stats_raw = FirebaseService.get_stats_ref(user_id).get()
+        stats_ref = FirebaseService.get_stats_ref(user_id)
+        stats_raw = stats_ref.get()
         stats = stats_raw if isinstance(stats_raw, dict) else None
         
-        # Se non esistono, calcolale
-        if not stats:
+        if stats:
+            # Verifica se lo streak è potenzialmente scaduto (se l'ultimo update non è di oggi)
+            last_updated_str = stats.get('lastUpdated')
+            if last_updated_str:
+                last_updated = datetime.fromisoformat(last_updated_str.replace('Z', '+00:00'))
+                if last_updated.date() < datetime.utcnow().date():
+                    # Giorno cambiato: ricalcola per aggiornare lo streak
+                    await FirebaseService.update_user_stats(user_id)
+                    stats = stats_ref.get()
+        else:
+            # Se non esistono, calcolale
             await FirebaseService.update_user_stats(user_id)
-            stats_raw = FirebaseService.get_stats_ref(user_id).get()
-            stats = stats_raw if isinstance(stats_raw, dict) else None
+            stats = stats_ref.get()
         
-        return stats
+        return stats if isinstance(stats, dict) else None
     
     @staticmethod
     async def get_calendar_data(user_id: str, year: int, month: int) -> Dict[str, Dict]:
@@ -334,6 +396,30 @@ class FirebaseService:
                 }
         
         return calendar_data
+
+    @staticmethod
+    async def increment_mindful_moments(user_id: str):
+        """Incrementa il contatore delle sessioni di mindfulness"""
+        stats_ref = FirebaseService.get_stats_ref(user_id)
+        stats = stats_ref.get()
+        
+        if not isinstance(stats, dict):
+            # Se le statistiche non esistono, inizializzale
+            await FirebaseService.update_user_stats(user_id)
+            stats = stats_ref.get()
+            
+        current_count = stats.get('mindfulMomentsCount', 0) if isinstance(stats, dict) else 0
+        new_count = current_count + 1
+        
+        updates = {'mindfulMomentsCount': new_count}
+        
+        # Verifica sblocco badge
+        unlocked_badges = stats.get('unlockedBadges', []) if isinstance(stats, dict) else []
+        if new_count >= 1 and "mindful_moment" not in unlocked_badges:
+            unlocked_badges.append("mindful_moment")
+            updates['unlockedBadges'] = unlocked_badges
+            
+        stats_ref.update(updates)
 
 
 # Istanza singleton

@@ -173,6 +173,8 @@ class UserStats(BaseModel):
     averageIntensity: float
     weeklyRhythm: Optional[WeeklyRhythm] = None
     patterns: List[MoodPattern] = []
+    mindfulMomentsCount: int = 0
+    unlockedBadges: List[str] = []
     lastUpdated: datetime
 
 
@@ -305,3 +307,30 @@ class ErrorResponse(BaseModel):
     error: str
     detail: Optional[str] = None
     status_code: int
+
+# ===================== Challenges =====================
+
+class ChallengeStatus(str, Enum):
+    """Stato di una sfida"""
+    LOCKED = "locked"
+    COMPLETED = "completed"
+
+
+class Challenge(BaseModel):
+    """Modello per una sfida individuale"""
+    id: str
+    name: str
+    description: str
+    goal: str
+    icon: str
+    status: ChallengeStatus
+    progress: int = Field(..., ge=0, le=100)
+    currentValue: int
+    targetValue: int
+
+
+class UserChallengesResponse(BaseModel):
+    """Risposta per le sfide dell'utente"""
+    currentStreak: int
+    unlockedBadges: List[str]
+    challenges: List[Challenge]
