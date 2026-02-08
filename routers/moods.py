@@ -4,13 +4,37 @@ Router per CRUD mood entries
 from fastapi import APIRouter, HTTPException, status, Depends, Query
 from typing import Optional
 from datetime import datetime, timezone
-from models import MoodCreate, MoodUpdate, MoodEntry, MoodList
+from models import MoodCreate, MoodUpdate, MoodEntry, MoodList, Location, ExternalWeather
 from services.firebase_service import firebase_service
 from middleware.auth import get_current_user_id, check_rate_limit
-from routers.weather import fetch_and_parse_weather
+from routers.weather import fetch_and_parse_weather, fetch_openweather_data
+
 
 
 router = APIRouter(prefix="/moods", tags=["Moods"])
+
+
+async def fetch_weather_for_location(location: Location) -> Optional[ExternalWeather]:
+    """
+    Recupera dati meteo per una location e li converte in ExternalWeather
+
+    Returns None se il fetch fallisce (non solleva eccezioni)
+    """
+    try:
+        weather_data = await fetch_openweather_data(location.lat, location.lon)
+
+        return ExternalWeather(
+            temp=weather_data['main']['temp'],
+            feels_like=weather_data['main']['feels_like'],
+            humidity=weather_data['main']['humidity'],
+            weather_main=weather_data['weather'][0]['main'],
+            weather_description=weather_data['weather'][0]['description'],
+            icon=weather_data['weather'][0]['icon']
+        )
+    except Exception:
+        # Se il fetch meteo fallisce, non blocchiamo l'operazione
+        # Il mood verrà salvato senza dati meteo
+        return None
 
 
 @router.post("", response_model=MoodEntry, status_code=status.HTTP_201_CREATED)
@@ -36,10 +60,11 @@ async def create_mood(
         )
     
     try:
-        # Ottieni la data del mood (timestamp è ora sempre timezone-aware in UTC)
-        mood_date = mood_data.timestamp.date()
+        # Genera timestamp server-side in UTC
+        now_utc = datetime.now(timezone.utc)
+        mood_date = now_utc.date()
         
-        # Cerca mood esistente per la stessa giornata (crea datetime UTC-aware)
+        # Cerca mood esistente per la stessa giornata UTC
         start_of_day = datetime.combine(mood_date, datetime.min.time()).replace(tzinfo=timezone.utc)
         end_of_day = datetime.combine(mood_date, datetime.max.time()).replace(tzinfo=timezone.utc)
         
@@ -68,13 +93,14 @@ async def create_mood(
             # Aggiorna il mood esistente
             existing_entry = existing_moods[0]
             entry_id = existing_entry['entryId']
-            
-            # Prepara dati per update (escludi userId e timestamp)
+
+            # Prepara dati per update (escludi userId, mantieni timestamp originale)
             update_dict = {
                 'emojis': mood_dict['emojis'],
                 'intensity': mood_dict['intensity'],
                 'note': mood_dict.get('note'),
-                'location': mood_dict.get('location')
+                'location': mood_dict.get('location'),
+                'externalWeather': mood_dict.get('externalWeather')
             }
             
             if 'externalWeather' in mood_dict:
@@ -111,7 +137,6 @@ async def create_mood(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create/update mood: {str(e)}"
         )
-
 
 @router.get("", response_model=MoodList)
 async def get_moods(
@@ -152,16 +177,14 @@ async def get_moods(
         
         # Converti in MoodEntry objects
         mood_entries = [MoodEntry(**mood) for mood in moods_data]
-        
-        
-        res =  MoodList(
+
+        return MoodList(
             items=mood_entries,
             total=total,
             limit=limit,
             offset=offset,
             hasMore=(offset + limit) < total
         )
-        return res
     
     except Exception as e:
         raise HTTPException(
@@ -241,13 +264,19 @@ async def update_mood(
         
         # Prepara dati per update (solo campi non-None)
         update_dict = update_data.model_dump(exclude_none=True)
-        
+
         if not update_dict:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No fields to update"
             )
-        
+
+        # Recupera dati meteo se location è presente nell'update
+        if 'location' in update_dict:
+            weather_data = await fetch_weather_for_location(Location(**update_dict['location']))
+            if weather_data:
+                update_dict['externalWeather'] = weather_data.model_dump()
+
         # Aggiorna
         success = await firebase_service.update_mood_entry(
             current_user_id,

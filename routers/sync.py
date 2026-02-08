@@ -2,7 +2,7 @@
 Router per sincronizzazione offline
 """
 from fastapi import APIRouter, HTTPException, status, Depends
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List
 from models import SyncRequest, SyncResponse, SyncResult, MoodCreate
 from services.firebase_service import firebase_service
@@ -113,7 +113,7 @@ async def sync_mood_entries(
                 localId=entry.localId,
                 serverId=server_id,
                 status=sync_status,
-                serverTimestamp=datetime.utcnow()
+                serverTimestamp=datetime.now(timezone.utc)
             ))
             success_count += 1
         

@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Import routers
-from routers import auth, moods, stats, weather, sync, nlp, export, notifications
+from routers import auth, moods, stats, weather, sync, nlp, export, notifications, challenges
 
 
 # ==================== Lifespan Events ====================
@@ -74,6 +74,7 @@ app.include_router(sync.router)
 app.include_router(nlp.router)
 app.include_router(export.router)
 app.include_router(notifications.router)
+app.include_router(challenges.router)
 
 
 # ==================== Root Endpoints ====================
@@ -94,7 +95,8 @@ async def root():
             "sync": "/sync",
             "nlp": "/nlp (skeleton)",
             "export": "/export (skeleton)",
-            "notifications": "/notifications"
+            "notifications": "/notifications",
+            "challenges": "/challenges"
         }
     }
 

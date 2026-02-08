@@ -74,7 +74,7 @@ class ExternalWeather(BaseModel):
 class MoodCreate(BaseModel):
     """Creazione nuovo mood entry"""
     userId: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     emojis: List[str] = Field(..., min_length=1, max_length=5)
     intensity: int = Field(..., ge=0, le=100, description="Intensità mood 0-100")
     note: Optional[str] = Field(None, max_length=500)
@@ -103,7 +103,8 @@ class MoodUpdate(BaseModel):
     emojis: Optional[List[str]] = Field(None, min_length=1, max_length=5)
     intensity: Optional[int] = Field(None, ge=0, le=100)
     note: Optional[str] = Field(None, max_length=500)
-    
+    location: Optional[Location] = None
+
     @validator('emojis')
     def validate_emojis(cls, v):
         if v is not None:
@@ -173,6 +174,8 @@ class UserStats(BaseModel):
     averageIntensity: float
     weeklyRhythm: Optional[WeeklyRhythm] = None
     patterns: List[MoodPattern] = []
+    mindfulMomentsCount: int = 0
+    unlockedBadges: List[str] = []
     lastUpdated: datetime
 
 
@@ -295,7 +298,7 @@ class ForecastResponse(BaseModel):
     userId: str
     forecasts: List[MoodForecast]
     ml_model_version: str = "v1.0"  # Rinominato da model_version per evitare conflitto
-    generated_at: datetime = Field(default_factory=datetime.utcnow)
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 # ==================== Error Models ====================
@@ -305,3 +308,30 @@ class ErrorResponse(BaseModel):
     error: str
     detail: Optional[str] = None
     status_code: int
+
+# ===================== Challenges =====================
+
+class ChallengeStatus(str, Enum):
+    """Stato di una sfida"""
+    LOCKED = "locked"
+    COMPLETED = "completed"
+
+
+class Challenge(BaseModel):
+    """Modello per una sfida individuale"""
+    id: str
+    name: str
+    description: str
+    goal: str
+    icon: str
+    status: ChallengeStatus
+    progress: int = Field(..., ge=0, le=100)
+    currentValue: int
+    targetValue: int
+
+
+class UserChallengesResponse(BaseModel):
+    """Risposta per le sfide dell'utente"""
+    currentStreak: int
+    unlockedBadges: List[str]
+    challenges: List[Challenge]
