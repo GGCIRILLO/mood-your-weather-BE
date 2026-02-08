@@ -8,8 +8,13 @@ from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import firebase_config  # Inizializza Firebase
 
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
 # Import routers
-from routers import auth, moods, stats, weather, sync, nlp, export, challenges
+from routers import auth, moods, stats, weather, sync, nlp, export, notifications, challenges
 
 
 # ==================== Lifespan Events ====================
@@ -68,6 +73,7 @@ app.include_router(weather.router)
 app.include_router(sync.router)
 app.include_router(nlp.router)
 app.include_router(export.router)
+app.include_router(notifications.router)
 app.include_router(challenges.router)
 
 
@@ -89,6 +95,7 @@ async def root():
             "sync": "/sync",
             "nlp": "/nlp (skeleton)",
             "export": "/export (skeleton)",
+            "notifications": "/notifications",
             "challenges": "/challenges"
         }
     }

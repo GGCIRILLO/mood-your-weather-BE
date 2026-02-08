@@ -87,10 +87,19 @@ class FirebaseService:
             mood_data['emojis'] = [str(e) for e in mood_data['emojis']]
         
         if 'location' in mood_data and mood_data['location']:
-            mood_data['location'] = {
-                'lat': mood_data['location'].lat,
-                'lon': mood_data['location'].lon
-            }
+            loc = mood_data['location']
+            # Handle both object (Pydantic) and dict access
+            lat = getattr(loc, 'lat', loc.get('lat') if isinstance(loc, dict) else None)
+            lon = getattr(loc, 'lon', loc.get('lon') if isinstance(loc, dict) else None)
+            
+            if lat is not None and lon is not None:
+                mood_data['location'] = {
+                    'lat': lat,
+                    'lon': lon
+                }
+            else:
+                # Ensure we don't persist unexpected or non-serializable location shapes
+                mood_data['location'] = None
         
         # Salva nel database
         FirebaseService.get_moods_ref(user_id).child(entry_id).set(mood_data)
@@ -196,6 +205,10 @@ class FirebaseService:
         moods_data_raw = FirebaseService.get_moods_ref(user_id).get()
         moods_data: Dict = moods_data_raw if isinstance(moods_data_raw, dict) else {}
         
+        # Fetch old stats for comparison (achievements)
+        old_stats_raw = FirebaseService.get_stats_ref(user_id).get()
+        old_stats = old_stats_raw if isinstance(old_stats_raw, dict) else None
+        
         if not moods_data:
             # Anche se non ci sono mood, potremmo avere altre statistiche da preservare
             existing_stats = await FirebaseService.get_user_stats(user_id) or {}
@@ -272,7 +285,43 @@ class FirebaseService:
             'unlockedBadges': unlocked_badges,
             'lastUpdated': datetime.now(timezone.utc).isoformat()
         }
-        stats_ref.set(stats)
+        
+        FirebaseService.get_stats_ref(user_id).set(stats)
+        
+        # Check for achievements/milestones
+        await FirebaseService.check_achievements(user_id, old_stats, stats)
+    
+    @staticmethod
+    async def check_achievements(user_id: str, old_stats: Optional[Dict], new_stats: Dict):
+        """Check if new stats trigger any achievements/notifications"""
+        # Get FCM token
+        token = await FirebaseService.get_fcm_token(user_id)
+        if not token:
+            return
+
+        # 1. Challenge Completion (7-day streak)
+        # Trigger when streak becomes 7 (was < 7 before)
+        new_streak = new_stats.get('currentStreak', 0)
+        old_streak = old_stats.get('currentStreak', 0) if old_stats else 0
+        
+        if new_streak == 7 and old_streak < 7:
+            await FirebaseService.send_push_notification(
+                token=token,
+                title="Challenge Completed! 🎉",
+                body="You completed the 7-day challenge! Keep it up!"
+            )
+            
+        # 2. Milestone Celebrations (30 days logged)
+        # Trigger when totalEntries hits 30 (was < 30 before)
+        new_total = new_stats.get('totalEntries', 0)
+        old_total = old_stats.get('totalEntries', 0) if old_stats else 0
+        
+        if new_total == 30 and old_total < 30:
+            await FirebaseService.send_push_notification(
+                token=token,
+                title="Milestone Reached! ✨",
+                body="30 days logged! Amazing progress!"
+            )
     
     @staticmethod
     def _calculate_streaks(moods_list: List[Dict]) -> tuple[int, int]:
@@ -428,6 +477,54 @@ class FirebaseService:
             
         stats_ref.update(updates)
 
+
+
+    # ==================== Notification Operations ====================
+    
+    @staticmethod
+    async def save_fcm_token(user_id: str, token: str):
+        """Salva token FCM per utente"""
+        FirebaseService.get_user_ref(user_id).child('fcmToken').set(token)
+    
+    @staticmethod
+    async def get_fcm_token(user_id: str) -> Optional[str]:
+        """Ottieni token FCM utente"""
+        token = FirebaseService.get_user_ref(user_id).child('fcmToken').get()
+        return token if isinstance(token, str) else None
+
+    @staticmethod
+    async def send_push_notification(token: str, title: str, body: str, data: Optional[Dict] = None) -> bool:
+        """Invia notifica push via FCM"""
+        from firebase_admin import messaging
+        
+        try:
+            message = messaging.Message(
+                notification=messaging.Notification(
+                    title=title,
+                    body=body
+                ),
+                data=data,
+                token=token,
+                android=messaging.AndroidConfig(
+                    priority='high',
+                    notification=messaging.AndroidNotification(
+                        sound='default'
+                    )
+                ),
+                apns=messaging.APNSConfig(
+                    payload=messaging.APNSPayload(
+                        aps=messaging.Aps(
+                            sound='default'
+                        )
+                    )
+                )
+            )
+            response = messaging.send(message)
+            print("Successfully sent message:", response)
+            return True
+        except Exception as e:
+            print("Error sending message:", e)
+            return False
 
 # Istanza singleton
 firebase_service = FirebaseService()

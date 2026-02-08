@@ -7,6 +7,10 @@ python-dotenv==1.0.0
 # Firebase
 firebase-admin==6.5.0
 
+# Google Cloud
+# google-cloud-language==2.13.3
+google-api-python-client==2.129.0
+
 # HTTP Client
 httpx==0.27.0
 

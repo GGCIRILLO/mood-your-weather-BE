@@ -1,8 +1,10 @@
 .venv/
 
+
 .env
 
 __pycache__/
 *.pyc
 
 mood-your-weather-firebase-adminsdk-fbsvc-da13f7ee3e.json
+/venv
