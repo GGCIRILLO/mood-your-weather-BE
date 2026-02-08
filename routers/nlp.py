@@ -16,11 +16,7 @@ router = APIRouter(prefix="/nlp", tags=["NLP"])
 @router.post("/analyze", response_model=NLPAnalyzeResponse)
 async def analyze_sentiment(
     request: NLPAnalyzeRequest,
-    
-    
-    # current_user_id: str = Depends(get_current_user_id)
-    current_user_id: str = "test_user_verifying" # Depends(get_current_user_id)
-    
+    current_user_id: str = Depends(get_current_user_id)
 ):
     """
     Analisi sentiment di note testuali con Hugging Face Inference API
