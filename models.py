@@ -59,6 +59,7 @@ class Location(BaseModel):
     """Coordinata geografica"""
     lat: float = Field(..., ge=-90, le=90, description="Latitudine")
     lon: float = Field(..., ge=-180, le=180, description="Longitudine")
+    name: Optional[str] = Field(None, description="Nome leggibile della location")
 
 
 class ExternalWeather(BaseModel):

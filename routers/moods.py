@@ -9,6 +9,7 @@ from models import (
     Location, ExternalWeather, MoodEntryWithNLP, MoodListWithNLP
 )
 from services.firebase_service import firebase_service
+from services.geocoding import reverse_geocode, format_location_short
 from middleware.auth import get_current_user_id, check_rate_limit
 from routers.weather import fetch_and_parse_weather, fetch_openweather_data
 from routers.nlp import analyze_mood_entry
@@ -83,14 +84,20 @@ async def create_mood(
         
         mood_dict = mood_data.model_dump()
         
-        # 3. Fetch external weather if location is provided
+        # 3. Fetch external weather and geocode if location is provided
         if mood_data.location:
+             # Fetch weather data
              external_weather = await fetch_and_parse_weather(
                  mood_data.location.lat, 
                  mood_data.location.lon
              )
              if external_weather:
                  mood_dict['externalWeather'] = external_weather.model_dump()
+             
+             # Reverse geocoding for human-readable name
+             geocoded = await reverse_geocode(mood_data.location.lat, mood_data.location.lon)
+             if geocoded:
+                 mood_dict['location']['name'] = format_location_short(geocoded)
         
         
         if existing_moods:
@@ -181,7 +188,7 @@ async def get_moods(
         
         # Converti in MoodEntry objects
         mood_entries = [MoodEntry(**mood) for mood in moods_data]
-
+        
         return MoodList(
             items=mood_entries,
             total=total,
@@ -362,11 +369,19 @@ async def update_mood(
                 detail="No fields to update"
             )
 
-        # Recupera dati meteo se location è presente nell'update
+        # Recupera dati meteo e geocoding se location è presente nell'update
         if 'location' in update_dict:
-            weather_data = await fetch_weather_for_location(Location(**update_dict['location']))
+            loc_data = Location(**update_dict['location'])
+            
+            # Fetch weather
+            weather_data = await fetch_weather_for_location(loc_data)
             if weather_data:
                 update_dict['externalWeather'] = weather_data.model_dump()
+            
+            # Reverse geocoding for human-readable name
+            geocoded = await reverse_geocode(loc_data.lat, loc_data.lon)
+            if geocoded:
+                update_dict['location']['name'] = format_location_short(geocoded)
 
         # Aggiorna
         success = await firebase_service.update_mood_entry(
