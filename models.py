@@ -103,7 +103,8 @@ class MoodUpdate(BaseModel):
     emojis: Optional[List[str]] = Field(None, min_length=1, max_length=5)
     intensity: Optional[int] = Field(None, ge=0, le=100)
     note: Optional[str] = Field(None, max_length=500)
-    
+    location: Optional[Location] = None
+
     @validator('emojis')
     def validate_emojis(cls, v):
         if v is not None:
