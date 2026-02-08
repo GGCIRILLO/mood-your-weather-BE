@@ -2,7 +2,7 @@
 Router per statistiche e analytics
 """
 from fastapi import APIRouter, HTTPException, status, Depends, Query
-from datetime import datetime
+from datetime import datetime, timezone
 from models import UserStats, CalendarMonth, CalendarDay
 from services.firebase_service import firebase_service
 from middleware.auth import get_current_user_id, check_rate_limit
@@ -46,9 +46,9 @@ async def get_user_stats(
                 averageIntensity=0.0,
                 weeklyRhythm=None,
                 patterns=[],
-                lastUpdated=datetime.utcnow()
+                lastUpdated=datetime.now(timezone.utc)
             )
-        
+
         return UserStats(**stats)
     
     except Exception as e:

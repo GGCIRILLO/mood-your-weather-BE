@@ -69,11 +69,18 @@ class FirebaseService:
         user_id = mood_data['userId']
         entry_id = str(uuid.uuid4())
         
+        now_utc = datetime.now(timezone.utc)
         
         # Aggiungi metadata
         mood_data['entryId'] = entry_id
-        mood_data['createdAt'] = datetime.now(timezone.utc).isoformat()
-        mood_data['timestamp'] = mood_data.get('timestamp', datetime.now(timezone.utc)).isoformat()
+        mood_data['createdAt'] = now_utc.isoformat()
+        mood_data['updatedAt'] = now_utc.isoformat()
+        
+        # Se timestamp non è già un datetime object, usa now_utc
+        if 'timestamp' not in mood_data or not isinstance(mood_data['timestamp'], datetime):
+            mood_data['timestamp'] = now_utc.isoformat()
+        else:
+            mood_data['timestamp'] = mood_data['timestamp'].isoformat()
         
         # Serializza emojis e location
         if 'emojis' in mood_data and isinstance(mood_data['emojis'], list):
@@ -207,7 +214,7 @@ class FirebaseService:
                 'weeklyRhythm': {d: 0 for d in ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']},
                 'mindfulMomentsCount': existing_stats.get('mindfulMomentsCount', 0),
                 'unlockedBadges': unlocked_badges,
-                'lastUpdated': datetime.utcnow().isoformat()
+                'lastUpdated': datetime.now(timezone.utc).isoformat()
             }
             FirebaseService.get_stats_ref(user_id).set(stats)
             return
@@ -263,7 +270,7 @@ class FirebaseService:
             'weeklyRhythm': weekly_rhythm,
             'mindfulMomentsCount': existing_stats.get('mindfulMomentsCount', 0),
             'unlockedBadges': unlocked_badges,
-            'lastUpdated': datetime.utcnow().isoformat()
+            'lastUpdated': datetime.now(timezone.utc).isoformat()
         }
         stats_ref.set(stats)
     
@@ -291,11 +298,11 @@ class FirebaseService:
                 continue
         
         sorted_dates = sorted(list(dates), reverse=True)
-        
+
         if not sorted_dates:
             return 0, 0
-            
-        today = datetime.utcnow().date()
+
+        today = datetime.now(timezone.utc).date()
         yesterday = today - timedelta(days=1)
         
         # Current streak logic: must have logged today or yesterday
@@ -354,7 +361,7 @@ class FirebaseService:
             last_updated_str = stats.get('lastUpdated')
             if last_updated_str:
                 last_updated = datetime.fromisoformat(last_updated_str.replace('Z', '+00:00'))
-                if last_updated.date() < datetime.utcnow().date():
+                if last_updated.date() < datetime.now(timezone.utc).date():
                     # Giorno cambiato: ricalcola per aggiornare lo streak
                     await FirebaseService.update_user_stats(user_id)
                     stats = stats_ref.get()
@@ -369,11 +376,11 @@ class FirebaseService:
     async def get_calendar_data(user_id: str, year: int, month: int) -> Dict[str, Dict]:
         """Ottieni dati calendario per mese specifico"""
         # Calcola range date
-        start_date = datetime(year, month, 1)
+        start_date = datetime(year, month, 1, tzinfo=timezone.utc)
         if month == 12:
-            end_date = datetime(year + 1, 1, 1)
+            end_date = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
         else:
-            end_date = datetime(year, month + 1, 1)
+            end_date = datetime(year, month + 1, 1, tzinfo=timezone.utc)
         
         moods, _ = await FirebaseService.get_mood_entries(
             user_id,

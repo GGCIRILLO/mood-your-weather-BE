@@ -5,7 +5,7 @@ from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from firebase_admin import auth as firebase_auth
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 import asyncio
 
@@ -65,11 +65,11 @@ class RateLimiter:
         # user_id -> [(timestamp1, timestamp2, ...)]
         self.requests: defaultdict = defaultdict(list)
         self.cleanup_interval = 60  # Secondi tra cleanup
-        self.last_cleanup = datetime.utcnow()
-    
+        self.last_cleanup = datetime.now(timezone.utc)
+
     def _cleanup_old_requests(self):
         """Rimuovi timestamp vecchi per liberare memoria"""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         if (now - self.last_cleanup).seconds < self.cleanup_interval:
             return
         
@@ -96,8 +96,8 @@ class RateLimiter:
         Returns True se OK, False se limite superato
         """
         self._cleanup_old_requests()
-        
-        now = datetime.utcnow()
+
+        now = datetime.now(timezone.utc)
         window_start = now - timedelta(seconds=window_seconds)
         
         # Filtra request nel window

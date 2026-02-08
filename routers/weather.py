@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, status, Query, Depends
 from typing import Optional
 import httpx
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from models import WeatherCurrent, Location
 from middleware.auth import optional_auth
 
@@ -39,7 +39,7 @@ async def fetch_openweather_data(lat: float, lon: float) -> dict:
         "lon": lon,
         "appid": api_key,
         "units": "metric",  # Celsius
-        "lang": "it"
+        "lang": "en"
     }
     
     try:
@@ -94,8 +94,8 @@ async def get_current_weather(
     try:
         # Check cache
         cache_key = get_cache_key(lat, lon)
-        now = datetime.utcnow()
-        
+        now = datetime.now(timezone.utc)
+
         if cache_key in weather_cache:
             cached_data, cached_time = weather_cache[cache_key]
             if now - cached_time < CACHE_DURATION:

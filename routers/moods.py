@@ -35,10 +35,11 @@ async def create_mood(
         )
     
     try:
-        # Ottieni la data del mood (timestamp è ora sempre timezone-aware in UTC)
-        mood_date = mood_data.timestamp.date()
+        # Genera timestamp server-side in UTC
+        now_utc = datetime.now(timezone.utc)
+        mood_date = now_utc.date()
         
-        # Cerca mood esistente per la stessa giornata (crea datetime UTC-aware)
+        # Cerca mood esistente per la stessa giornata UTC
         start_of_day = datetime.combine(mood_date, datetime.min.time()).replace(tzinfo=timezone.utc)
         end_of_day = datetime.combine(mood_date, datetime.max.time()).replace(tzinfo=timezone.utc)
         
@@ -51,13 +52,15 @@ async def create_mood(
         )
         
         mood_dict = mood_data.model_dump()
+        # Sovrascrivi il timestamp con quello server-side
+        mood_dict['timestamp'] = now_utc
         
         if existing_moods:
             # Aggiorna il mood esistente
             existing_entry = existing_moods[0]
             entry_id = existing_entry['entryId']
             
-            # Prepara dati per update (escludi userId e timestamp)
+            # Prepara dati per update (escludi userId, mantieni timestamp originale)
             update_dict = {
                 'emojis': mood_dict['emojis'],
                 'intensity': mood_dict['intensity'],
@@ -96,7 +99,6 @@ async def create_mood(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create/update mood: {str(e)}"
         )
-
 
 @router.get("", response_model=MoodList)
 async def get_moods(
@@ -137,16 +139,14 @@ async def get_moods(
         
         # Converti in MoodEntry objects
         mood_entries = [MoodEntry(**mood) for mood in moods_data]
-        
-        
-        res =  MoodList(
+
+        return MoodList(
             items=mood_entries,
             total=total,
             limit=limit,
             offset=offset,
             hasMore=(offset + limit) < total
         )
-        return res
     
     except Exception as e:
         raise HTTPException(

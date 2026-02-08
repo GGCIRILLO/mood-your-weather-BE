@@ -74,7 +74,7 @@ class ExternalWeather(BaseModel):
 class MoodCreate(BaseModel):
     """Creazione nuovo mood entry"""
     userId: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     emojis: List[str] = Field(..., min_length=1, max_length=5)
     intensity: int = Field(..., ge=0, le=100, description="Intensità mood 0-100")
     note: Optional[str] = Field(None, max_length=500)
@@ -297,7 +297,7 @@ class ForecastResponse(BaseModel):
     userId: str
     forecasts: List[MoodForecast]
     ml_model_version: str = "v1.0"  # Rinominato da model_version per evitare conflitto
-    generated_at: datetime = Field(default_factory=datetime.utcnow)
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 # ==================== Error Models ====================
