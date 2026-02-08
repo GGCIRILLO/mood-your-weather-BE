@@ -24,7 +24,7 @@ router = APIRouter(prefix="/export", tags=["Export"])
 @router.post("/csv")
 async def export_to_csv(
     request: ExportRequest,
-  current_user_id: str = "test_user_verifying" # Depends(get_current_user_id)
+  current_user_id: str = Depends(get_current_user_id)
 ):
     """
     Export dati mood in formato CSV (Download diretto)
@@ -99,7 +99,7 @@ async def export_to_csv(
 @router.post("/google-sheets", response_model=ExportResponse)
 async def export_to_google_sheets(
     request: ExportRequest,
-  current_user_id: str = "test_user_verifying" # Depends(get_current_user_id)
+  current_user_id: str = Depends(get_current_user_id)
 ):
     """
     Export dati mood su Google Sheets
@@ -111,21 +111,36 @@ async def export_to_google_sheets(
         )
     
     try:
-        if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+        cred_filename = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        if not cred_filename:
              return ExportResponse(
                 success=False,
                 message="Google Service Account credentials missing"
              )
 
+        # Costruisci il path assoluto del file credenziali
+        cred_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            cred_filename
+        )
+
+        # Verifica che il file esista
+        if not os.path.exists(cred_path):
+            logger.error(f"Credentials file not found: {cred_path}")
+            return ExportResponse(
+                success=False,
+                message=f"Credentials file not found: {cred_filename}"
+            )
+
         # 1. Fetch data
         moods, total = await firebase_service.get_mood_entries(
             user_id=current_user_id,
-            limit=10000 
+            limit=10000
         )
-        
+
         # 2. Setup Google Sheets Service
         creds = service_account.Credentials.from_service_account_file(
-            os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
+            cred_path,
             scopes=['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive.file']
         )
         service = build('sheets', 'v4', credentials=creds)
@@ -137,6 +152,7 @@ async def export_to_google_sheets(
                 'title': f'Mood Tracker Export - {datetime.utcnow().strftime("%Y-%m-%d")}'
             }
         }
+        print("Creating Google Sheet...")
         
         sheet = service.spreadsheets().create(
             body=spreadsheet_body,
@@ -145,6 +161,7 @@ async def export_to_google_sheets(
         
         spreadsheet_id = sheet.get('spreadsheetId')
         spreadsheet_url = sheet.get('spreadsheetUrl')
+        print(f"Google Sheet created: {spreadsheet_url}")
         
         # 4. Prepare Data
         # Header
