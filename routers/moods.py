@@ -4,10 +4,15 @@ Router per CRUD mood entries
 from fastapi import APIRouter, HTTPException, status, Depends, Query
 from typing import Optional
 from datetime import datetime, timezone
-from models import MoodCreate, MoodUpdate, MoodEntry, MoodList, Location, ExternalWeather
+from models import (
+    MoodCreate, MoodUpdate, MoodEntry, MoodList,
+    Location, ExternalWeather, MoodEntryWithNLP, MoodListWithNLP
+)
 from services.firebase_service import firebase_service
+from services.geocoding import reverse_geocode, format_location_short
 from middleware.auth import get_current_user_id, check_rate_limit
 from routers.weather import fetch_and_parse_weather, fetch_openweather_data
+from routers.nlp import analyze_mood_entry
 
 
 
@@ -79,14 +84,20 @@ async def create_mood(
         
         mood_dict = mood_data.model_dump()
         
-        # 3. Fetch external weather if location is provided
+        # 3. Fetch external weather and geocode if location is provided
         if mood_data.location:
+             # Fetch weather data
              external_weather = await fetch_and_parse_weather(
                  mood_data.location.lat, 
                  mood_data.location.lon
              )
              if external_weather:
                  mood_dict['externalWeather'] = external_weather.model_dump()
+             
+             # Reverse geocoding for human-readable name
+             geocoded = await reverse_geocode(mood_data.location.lat, mood_data.location.lon)
+             if geocoded:
+                 mood_dict['location']['name'] = format_location_short(geocoded)
         
         
         if existing_moods:
@@ -177,7 +188,7 @@ async def get_moods(
         
         # Converti in MoodEntry objects
         mood_entries = [MoodEntry(**mood) for mood in moods_data]
-
+        
         return MoodList(
             items=mood_entries,
             total=total,
@@ -190,6 +201,93 @@ async def get_moods(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch moods: {str(e)}"
+        )
+
+
+@router.get("/journal", response_model=MoodListWithNLP)
+async def get_moods_with_notes(
+    userId: Optional[str] = Query(None, description="Filter by user ID"),
+    startDate: Optional[datetime] = Query(None, description="Start date filter (ISO-8601)"),
+    endDate: Optional[datetime] = Query(None, description="End date filter (ISO-8601)"),
+    limit: int = Query(50, ge=1, le=100, description="Max results per page"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    current_user_id: str = Depends(get_current_user_id),
+    _: None = Depends(check_rate_limit)
+):
+    """
+    Lista mood entries che hanno una nota allegata, con analisi NLP
+
+    - Filtra solo moods con nota non vuota
+    - Per ogni mood, esegue analisi NLP considerando:
+      * La nota dell'utente
+      * Gli emojis e l'intensità del mood
+      * Le condizioni meteo (se disponibili)
+    - Restituisce mood entries completi + risultati analisi NLP
+    - Supporta filtri per data range e paginazione
+    - Richiede autenticazione
+    """
+    # Se userId non specificato, usa current user
+    target_user_id = userId or current_user_id
+
+    # Verifica ownership
+    if target_user_id != current_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only view your own moods"
+        )
+
+    try:
+        # Recupera tutti i mood entries (con limite più alto per poter filtrare)
+        # Nota: idealmente il filtro dovrebbe essere fatto a livello DB
+        moods_data, total_all = await firebase_service.get_mood_entries(
+            user_id=target_user_id,
+            start_date=startDate,
+            end_date=endDate,
+            limit=1000,  # Limite alto per recuperare tutti i mood nel range
+            offset=0
+        )
+
+        # Filtra solo mood con note non vuote
+        moods_with_notes = [
+            mood for mood in moods_data
+            if mood.get('note') and mood.get('note').strip()
+        ]
+
+        total_with_notes = len(moods_with_notes)
+
+        # Applica paginazione manualmente
+        paginated_moods = moods_with_notes[offset:offset + limit]
+
+        # Converti in MoodEntry objects ed esegui analisi NLP per ognuno
+        mood_entries_with_nlp = []
+
+        for mood_data in paginated_moods:
+            mood_entry = MoodEntry(**mood_data)
+
+            # Esegui analisi NLP considerando mood, nota e meteo
+            nlp_analysis = await analyze_mood_entry(mood_entry)
+
+            # Crea oggetto combinato
+            mood_with_nlp = MoodEntryWithNLP(
+                mood=mood_entry,
+                nlpAnalysis=nlp_analysis
+            )
+            mood_entries_with_nlp.append(mood_with_nlp)
+            
+        print(mood_entries_with_nlp)
+
+        return MoodListWithNLP(
+            items=mood_entries_with_nlp,
+            total=total_with_notes,
+            limit=limit,
+            offset=offset,
+            hasMore=(offset + limit) < total_with_notes
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch moods with notes: {str(e)}"
         )
 
 
@@ -271,11 +369,19 @@ async def update_mood(
                 detail="No fields to update"
             )
 
-        # Recupera dati meteo se location è presente nell'update
+        # Recupera dati meteo e geocoding se location è presente nell'update
         if 'location' in update_dict:
-            weather_data = await fetch_weather_for_location(Location(**update_dict['location']))
+            loc_data = Location(**update_dict['location'])
+            
+            # Fetch weather
+            weather_data = await fetch_weather_for_location(loc_data)
             if weather_data:
                 update_dict['externalWeather'] = weather_data.model_dump()
+            
+            # Reverse geocoding for human-readable name
+            geocoded = await reverse_geocode(loc_data.lat, loc_data.lon)
+            if geocoded:
+                update_dict['location']['name'] = format_location_short(geocoded)
 
         # Aggiorna
         success = await firebase_service.update_mood_entry(
@@ -357,3 +463,4 @@ async def delete_mood(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete mood: {str(e)}"
         )
+        

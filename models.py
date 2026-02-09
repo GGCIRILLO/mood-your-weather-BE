@@ -59,6 +59,7 @@ class Location(BaseModel):
     """Coordinata geografica"""
     lat: float = Field(..., ge=-90, le=90, description="Latitudine")
     lon: float = Field(..., ge=-180, le=180, description="Longitudine")
+    name: Optional[str] = Field(None, description="Nome leggibile della location")
 
 
 class ExternalWeather(BaseModel):
@@ -144,6 +145,41 @@ class MoodList(BaseModel):
     hasMore: bool
 
 
+# ==================== NLP Models ====================
+
+class NLPAnalyzeRequest(BaseModel):
+    """Richiesta analisi sentiment (skeleton)"""
+    text: str = Field(..., max_length=1000)
+
+
+class NLPAnalyzeResponse(BaseModel):
+    """Risposta analisi sentiment (skeleton)"""
+    sentiment: str  # "positive", "negative", "neutral"
+    score: float = Field(..., ge=-1, le=1)
+    magnitude: float
+    emojis_suggested: List[str] = []
+
+
+class MoodEntryWithNLP(BaseModel):
+    """Mood entry con analisi NLP della nota"""
+    mood: MoodEntry
+    nlpAnalysis: NLPAnalyzeResponse
+
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
+
+
+class MoodListWithNLP(BaseModel):
+    """Lista paginata di mood entries con analisi NLP"""
+    items: List[MoodEntryWithNLP]
+    total: int
+    limit: int
+    offset: int
+    hasMore: bool
+
+
 # ==================== Statistics Models ====================
 
 class WeeklyRhythm(BaseModel):
@@ -213,21 +249,6 @@ class WeatherCurrent(BaseModel):
     sunrise: datetime
     sunset: datetime
     timezone: int
-
-
-# ==================== NLP Models (Skeleton) ====================
-
-class NLPAnalyzeRequest(BaseModel):
-    """Richiesta analisi sentiment (skeleton)"""
-    text: str = Field(..., max_length=1000)
-
-
-class NLPAnalyzeResponse(BaseModel):
-    """Risposta analisi sentiment (skeleton)"""
-    sentiment: str  # "positive", "negative", "neutral"
-    score: float = Field(..., ge=-1, le=1)
-    magnitude: float
-    emojis_suggested: List[str] = []
 
 
 # ==================== Export Models (Skeleton) ====================

@@ -91,11 +91,13 @@ class FirebaseService:
             # Handle both object (Pydantic) and dict access
             lat = getattr(loc, 'lat', loc.get('lat') if isinstance(loc, dict) else None)
             lon = getattr(loc, 'lon', loc.get('lon') if isinstance(loc, dict) else None)
+            name = getattr(loc, 'name', loc.get('name') if isinstance(loc, dict) else None)
             
             if lat is not None and lon is not None:
                 mood_data['location'] = {
                     'lat': lat,
-                    'lon': lon
+                    'lon': lon,
+                    'name': name
                 }
             else:
                 # Ensure we don't persist unexpected or non-serializable location shapes

@@ -9,6 +9,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from models import WeatherCurrent, Location, ExternalWeather
 from middleware.auth import optional_auth
+from services.geocoding import reverse_geocode, format_location_short
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -162,9 +163,15 @@ async def get_current_weather(
         # Fetch fresh data
         weather_data = await fetch_openweather_data(lat, lon)
         
+        # Reverse geocoding for human-readable name
+        location_name = None
+        geocoded = await reverse_geocode(lat, lon)
+        if geocoded:
+            location_name = format_location_short(geocoded)
+
         # Parse response
         weather_current = WeatherCurrent(
-            location=Location(lat=lat, lon=lon),
+            location=Location(lat=lat, lon=lon, name=location_name),
             temp=weather_data['main']['temp'],
             feels_like=weather_data['main']['feels_like'],
             temp_min=weather_data['main']['temp_min'],
