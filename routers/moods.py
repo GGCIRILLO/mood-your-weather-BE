@@ -11,35 +11,12 @@ from models import (
 from services.firebase_service import firebase_service
 from services.geocoding import reverse_geocode, format_location_short
 from middleware.auth import get_current_user_id, check_rate_limit
-from routers.weather import fetch_and_parse_weather, fetch_openweather_data
+from routers.weather import fetch_and_parse_weather_with_retry
 from routers.nlp import analyze_mood_entry
 
 
 
 router = APIRouter(prefix="/moods", tags=["Moods"])
-
-
-async def fetch_weather_for_location(location: Location) -> Optional[ExternalWeather]:
-    """
-    Recupera dati meteo per una location e li converte in ExternalWeather
-
-    Returns None se il fetch fallisce (non solleva eccezioni)
-    """
-    try:
-        weather_data = await fetch_openweather_data(location.lat, location.lon)
-
-        return ExternalWeather(
-            temp=weather_data['main']['temp'],
-            feels_like=weather_data['main']['feels_like'],
-            humidity=weather_data['main']['humidity'],
-            weather_main=weather_data['weather'][0]['main'],
-            weather_description=weather_data['weather'][0]['description'],
-            icon=weather_data['weather'][0]['icon']
-        )
-    except Exception:
-        # Se il fetch meteo fallisce, non blocchiamo l'operazione
-        # Il mood verrà salvato senza dati meteo
-        return None
 
 
 @router.post("", response_model=MoodEntry, status_code=status.HTTP_201_CREATED)
@@ -86,14 +63,13 @@ async def create_mood(
         
         # 3. Fetch external weather and geocode if location is provided
         if mood_data.location:
-             # Fetch weather data
-             external_weather = await fetch_and_parse_weather(
-                 mood_data.location.lat, 
+             # Fetch weather data with retry logic
+             external_weather = await fetch_and_parse_weather_with_retry(
+                 mood_data.location.lat,
                  mood_data.location.lon
              )
-             if external_weather:
-                 mood_dict['externalWeather'] = external_weather.model_dump()
-             
+             mood_dict['externalWeather'] = external_weather.model_dump()
+
              # Reverse geocoding for human-readable name
              geocoded = await reverse_geocode(mood_data.location.lat, mood_data.location.lon)
              if geocoded:
@@ -113,9 +89,6 @@ async def create_mood(
                 'location': mood_dict.get('location'),
                 'externalWeather': mood_dict.get('externalWeather')
             }
-            
-            if 'externalWeather' in mood_dict:
-                update_dict['externalWeather'] = mood_dict['externalWeather']
             
             success = await firebase_service.update_mood_entry(
                 current_user_id,
@@ -372,12 +345,14 @@ async def update_mood(
         # Recupera dati meteo e geocoding se location è presente nell'update
         if 'location' in update_dict:
             loc_data = Location(**update_dict['location'])
-            
-            # Fetch weather
-            weather_data = await fetch_weather_for_location(loc_data)
-            if weather_data:
-                update_dict['externalWeather'] = weather_data.model_dump()
-            
+
+            # Fetch weather with retry logic
+            weather_data = await fetch_and_parse_weather_with_retry(
+                loc_data.lat,
+                loc_data.lon
+            )
+            update_dict['externalWeather'] = weather_data.model_dump()
+
             # Reverse geocoding for human-readable name
             geocoded = await reverse_geocode(loc_data.lat, loc_data.lon)
             if geocoded:

@@ -93,7 +93,7 @@ async def fetch_and_parse_weather(lat: float, lon: float) -> Optional[ExternalWe
         # Check cache (reuse existing cache logic if possible, or simplified for this use case)
         cache_key = get_cache_key(lat, lon)
         now = datetime.utcnow()
-        
+
         if cache_key in weather_cache:
             cached_data, cached_time = weather_cache[cache_key]
             # Cached data is the raw dict from WeatherCurrent.model_dump()
@@ -111,7 +111,7 @@ async def fetch_and_parse_weather(lat: float, lon: float) -> Optional[ExternalWe
 
         # Fetch fresh data
         weather_data = await fetch_openweather_data(lat, lon)
-        
+
         # Parse relevant fields
         external_weather = ExternalWeather(
             temp=weather_data['main']['temp'],
@@ -121,20 +121,89 @@ async def fetch_and_parse_weather(lat: float, lon: float) -> Optional[ExternalWe
             weather_description=weather_data['weather'][0]['description'],
             icon=weather_data['weather'][0]['icon']
         )
-        
-        # We assume the main get_current_weather endpoint will handle its own caching 
+
+        # We assume the main get_current_weather endpoint will handle its own caching
         # when called directly. Since we are reusing fetch_openweather_data which returns raw JSON,
-        # we can optionally update cache here too if we want full consistency, 
+        # we can optionally update cache here too if we want full consistency,
         # but technically we only need the ExternalWeather subset here.
         # For simplicity and to avoid side effects on the main cache structure (which stores WeatherCurrent),
-        # we won't write to the global cache here unless we reconstruct the full object, 
+        # we won't write to the global cache here unless we reconstruct the full object,
         # which requires more parsing.
-        
+
         return external_weather
 
     except Exception as e:
         logger.error(f"Error fetching weather for mood: {str(e)}")
         return None
+
+
+async def fetch_and_parse_weather_with_retry(lat: float, lon: float, max_retries: int = 3) -> ExternalWeather:
+    """
+    Fetch weather data with retry logic.
+    Raises HTTPException after max_retries failed attempts.
+
+    Args:
+        lat: Latitude
+        lon: Longitude
+        max_retries: Maximum number of retry attempts (default: 3)
+
+    Returns:
+        ExternalWeather object
+
+    Raises:
+        HTTPException: If weather fetch fails after all retries
+    """
+    last_error = None
+
+    for attempt in range(max_retries):
+        try:
+            # Check cache first (only on first attempt)
+            if attempt == 0:
+                cache_key = get_cache_key(lat, lon)
+                now = datetime.utcnow()
+
+                if cache_key in weather_cache:
+                    cached_data, cached_time = weather_cache[cache_key]
+                    if now - cached_time < CACHE_DURATION:
+                        return ExternalWeather(
+                            temp=cached_data['temp'],
+                            feels_like=cached_data['feels_like'],
+                            humidity=cached_data['humidity'],
+                            weather_main=cached_data['weather_main'],
+                            weather_description=cached_data['weather_description'],
+                            icon=cached_data['icon']
+                        )
+
+            # Fetch fresh data
+            weather_data = await fetch_openweather_data(lat, lon)
+
+            # Parse and return
+            return ExternalWeather(
+                temp=weather_data['main']['temp'],
+                feels_like=weather_data['main']['feels_like'],
+                humidity=weather_data['main']['humidity'],
+                weather_main=weather_data['weather'][0]['main'],
+                weather_description=weather_data['weather'][0]['description'],
+                icon=weather_data['weather'][0]['icon']
+            )
+
+        except HTTPException as e:
+            # Don't retry on authentication/config errors
+            if e.status_code in [503, 401]:
+                raise
+            last_error = e
+            logger.warning(f"Weather fetch attempt {attempt + 1}/{max_retries} failed: {e.detail}")
+
+        except Exception as e:
+            last_error = e
+            logger.warning(f"Weather fetch attempt {attempt + 1}/{max_retries} failed: {str(e)}")
+
+    # All retries exhausted
+    logger.error(f"Failed to fetch weather after {max_retries} attempts")
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Failed to fetch weather data after multiple retries"
+    )
 
 
 @router.get("/current", response_model=WeatherCurrent)
